@@ -33,8 +33,8 @@ def superponer_gradcam(imagen: Image.Image, cam: np.ndarray) -> np.ndarray:
 
 def main() -> None:
     st.set_page_config(page_title="Triaje Radiografía de Columna",
-                       layout="wide")
-    st.title("🩻 Triaje IA — Radiografías de Columna")
+                         layout="wide")
+    st.title("🩻 TriajeX — Radiografías de Columna")
 
     with st.sidebar:
         try:
@@ -56,7 +56,7 @@ def main() -> None:
         imagen = Image.open(archivo)
         col1, col2 = st.columns(2)
         col1.image(imagen, caption="Radiografía original",
-                   use_container_width=True)
+                    use_container_width=True)
         try:
             with st.spinner("Analizando con la CNN…"):
                 prediccion = cnn.predecir(imagen)
