@@ -19,24 +19,23 @@ class DocumentoRecuperado:
 
 class AlmacenRAG:
     """
-    Cliente de Qdrant: intenta conexión por red y, si falla (entorno cloud),
-    activa el modo local embebido para garantizar estabilidad total.
+    Cliente de Qdrant: usa almacenamiento local embebido en disco para
+    garantizar estabilidad total en Streamlit Cloud sin requerir servidor de red.
     """
 
     def __init__(self, host: str, port: int, coleccion: str,
                  modelo_embedding: str) -> None:
         self.coleccion = coleccion
         try:
-            # Intento de conexión por red (servidor local o externo)
-            self.cliente = QdrantClient(host=host, port=port, timeout=3)
-            self.cliente.get_collections()
-        except Exception:
-            # Fallback automático a almacenamiento local embebido en disco para Cloud
+            # Forzar modo local embebido en disco (ideal para Cloud)
+            self.cliente = QdrantClient(path="./qdrant_storage")
+        except Exception as exc:
             try:
-                self.cliente = QdrantClient(path="./qdrant_storage")
-            except Exception as exc:
+                # Fallback secundario a red si estuviera en entorno con servidor dedicado
+                self.cliente = QdrantClient(host=host, port=port, timeout=3)
+            except Exception:
                 raise ConnectionError(
-                    f"No fue posible inicializar Qdrant (ni red ni local): {exc}"
+                    f"No fue posible inicializar Qdrant: {exc}"
                 ) from exc
 
         try:
@@ -58,7 +57,6 @@ class AlmacenRAG:
             "Protocolo de triaje y criterios de reporte estandarizado."
         )
         try:
-            # Verificar si la colección existe; si no, crearla vacía para evitar fallos
             collections = [c.name for c in self.cliente.get_collections().collections]
             if self.coleccion not in collections:
                 self.cliente.create_collection(
@@ -77,7 +75,6 @@ class AlmacenRAG:
             )
             resultado = respuesta.points
         except Exception as exc:
-            # Manejo defensivo para que la app muestre aviso en lugar de colapsar
             import warnings
             warnings.warn(f"Aviso en consulta RAG: {exc}")
             return []
