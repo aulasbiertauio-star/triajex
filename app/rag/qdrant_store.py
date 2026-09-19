@@ -19,23 +19,20 @@ class DocumentoRecuperado:
 
 class AlmacenRAG:
     """
-    Cliente de Qdrant: usa almacenamiento local embebido en disco para
-    garantizar estabilidad total en Streamlit Cloud sin requerir servidor de red.
+    Cliente de Qdrant: utiliza exclusivamente almacenamiento local embebido en disco
+    para evitar cualquier error de red (Errno 99) en Streamlit Cloud.
     """
 
     def __init__(self, host: str, port: int, coleccion: str,
                  modelo_embedding: str) -> None:
         self.coleccion = coleccion
         try:
-            # Forzar modo local embebido en disco (ideal para Cloud)
+            # Forzar modo local embebido puro (sin fallback a red)
             self.cliente = QdrantClient(path="./qdrant_storage")
         except Exception as exc:
-            try:
-                self.cliente = QdrantClient(host=host, port=port, timeout=3)
-            except Exception:
-                raise ConnectionError(
-                    f"No fue posible inicializar Qdrant: {exc}"
-                ) from exc
+            raise ConnectionError(
+                f"No fue posible inicializar Qdrant localmente: {exc}"
+            ) from exc
 
         try:
             self.embedder: SentenceTransformer = SentenceTransformer(
