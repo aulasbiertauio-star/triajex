@@ -27,7 +27,7 @@ class AlmacenRAG:
                  modelo_embedding: str) -> None:
         self.coleccion = coleccion
         try:
-            # Forzar modo local embebido puro (sin fallback a red)
+            # Forzar modo local embebido puro (sin red, sin host, sin puerto)
             self.cliente = QdrantClient(path="./qdrant_storage")
         except Exception as exc:
             raise ConnectionError(
@@ -71,6 +71,7 @@ class AlmacenRAG:
             )
             resultado = respuesta.points
         except Exception as exc:
+            # Captura defensiva para que la app muestre aviso en lugar de colapsar
             import warnings
             warnings.warn(f"Aviso en consulta RAG: {exc}")
             return []
