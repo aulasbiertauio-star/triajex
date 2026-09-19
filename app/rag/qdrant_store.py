@@ -31,7 +31,6 @@ class AlmacenRAG:
             self.cliente = QdrantClient(path="./qdrant_storage")
         except Exception as exc:
             try:
-                # Fallback secundario a red si estuviera en entorno con servidor dedicado
                 self.cliente = QdrantClient(host=host, port=port, timeout=3)
             except Exception:
                 raise ConnectionError(
