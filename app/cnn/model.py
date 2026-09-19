@@ -1,6 +1,6 @@
 """
 Módulo de Visión por Computadora (CNN + Grad-CAM).
-Estructura preparada para montar un modelo .pt preentrenado posteriormente.
+Estructura preparada para montar un modelo .pt preentrenado.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,7 +55,9 @@ class GradCAM:
         return (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
 
 
-ETIQUETAS: list[str] = ["normal", "escoliosis", "espina_bifida", "fractura"]
+# --- ÚNICO CAMBIO: Etiquetas binarias de Agnodis ---
+ETIQUETAS: list[str] = ["Normal", "Escoliosis"]
+# ---------------------------------------------------
 
 
 class ClasificadorColumna:
