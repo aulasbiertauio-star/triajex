@@ -99,7 +99,6 @@ class ClasificadorColumna:
                                  std=[0.229, 0.224, 0.225]),
         ])
 
-    @torch.inference_mode()
     def predecir(self, imagen_pil: Image.Image) -> PrediccionCNN:
         """Ejecuta la inferencia y calcula el Grad-CAM."""
         if not isinstance(imagen_pil, Image.Image):
