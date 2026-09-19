@@ -19,19 +19,19 @@ class DocumentoRecuperado:
 
 class AlmacenRAG:
     """
-    Cliente de Qdrant: utiliza exclusivamente almacenamiento local embebido en disco
-    para evitar cualquier error de red (Errno 99) en Streamlit Cloud.
+    Cliente de Qdrant: utiliza modo en memoria (:memory:) para garantizar
+    estabilidad total y evitar bloqueos de archivos en Streamlit Cloud.
     """
 
     def __init__(self, host: str, port: int, coleccion: str,
                  modelo_embedding: str) -> None:
         self.coleccion = coleccion
         try:
-            # Forzar modo local embebido puro (sin red, sin host, sin puerto)
-            self.cliente = QdrantClient(path="./qdrant_storage")
+            # Usar Qdrant en memoria RAM (cero bloqueos de disco)
+            self.cliente = QdrantClient(path=":memory:")
         except Exception as exc:
             raise ConnectionError(
-                f"No fue posible inicializar Qdrant localmente: {exc}"
+                f"No fue posible inicializar Qdrant en memoria: {exc}"
             ) from exc
 
         try:
@@ -71,7 +71,6 @@ class AlmacenRAG:
             )
             resultado = respuesta.points
         except Exception as exc:
-            # Captura defensiva para que la app muestre aviso en lugar de colapsar
             import warnings
             warnings.warn(f"Aviso en consulta RAG: {exc}")
             return []
