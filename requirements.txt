@@ -1,0 +1,9 @@
+streamlit
+torch
+torchvision
+opencv-python
+qdrant-client
+sentence-transformers
+pydantic-settings
+Pillow
+numpy

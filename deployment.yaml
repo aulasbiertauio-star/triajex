@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: triajex-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: triajex
+  template:
+    metadata:
+      labels:
+        app: triajex
+    spec:
+      containers:
+      - name: triajex-container
+        image: triajex:v1
+        ports:
+        - containerPort: 8501

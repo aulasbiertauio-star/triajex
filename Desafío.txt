@@ -1,0 +1,60 @@
+Desafío
+
+Optimizar el proceso de análisis de radiografías de la columna que ayude/apoye al médico a cargo
+
+Hechos
+
+	- La existencia del error humano
+	- Poca disponibilidad de experto
+	- Precisión de los experimentos
+
+Supuestos
+
+	Poca experiencia del especialista y oferta del mismo
+
+Pregunta
+	¿Cómo impulsar las capacidades del experto?
+
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Act. Dir/Indi
+	- Doctor, paciente.
+Act. Prioritario
+	- Especialista.
+¿Qué quiere hacer?
+	- Ayudar/impulsar la precisión y eficiencia el diagnóstico e interpretación de un caso específico para el médico.
+Dificultad
+	- Necesidad de una alta cantidad de datos
+Necesidad
+	- Mejorar y agilizar el diagnóstico médico para un mejor tratamiento
+
+
+El especialista necesita un apoyo al momento de realizar un diagnóstico porque requiere optimizar su tiempo, lo que actualmente provoca
+que pacientes no reciban un tratamiento en menor tiempo y mayor calidad.
+
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Hipótesis
+Creemos que el sistema de análisis y comparación de imagen permitirá al especialista realizar análisis radiográficos en un menor tiempo y con menor imagen de error porque así puede identificar detalles en radiografía que pueden no ser tan fáciles de captar.
+
+Supuesto Crítico
+	- Que el sistema no identifique las fallas
+	- Baja calidad del entrenamiento del sistema
+	- Baja calidad de radiografía o incompatibilidad del sistema
+
+Necesitamos construir una prueba que nos permita saber si el sistema es capaz de notar y resaltar zonas de la radiografía que sean indicios de las enfermedades para las que se entrenó.
+
+Alcance
+	- Nuestro prototipo permitirá al especialista obtener un preanálisis de las radiografías para comprobar si optimiza el tiempo del especialista y reduzca posibles errores.
+Tipo de prototipo	
+	- Funcionamiento
+Excluye
+	- Un diagnóstico obvio o fácil de interpretar para no cargar de información innecesaria al especialista.
+
+
+
+
+
+
+
+ 
