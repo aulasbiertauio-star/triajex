@@ -1,5 +1,4 @@
 """Dashboard de triaje con Streamlit: imagen -> CNN -> RAG -> pre-reporte."""
-import os
 import cv2
 import numpy as np
 import streamlit as st
@@ -35,14 +34,6 @@ def superponer_gradcam(imagen: Image.Image, cam: np.ndarray) -> np.ndarray:
 def main() -> None:
     st.set_page_config(page_title="Triaje Radiografía de Columna",
                        layout="wide")
-    
-    # Buscador inteligente del logo de TechGnosis en las rutas posibles
-    logo_paths = ["ok.jpg", "../ok.jpg", "app/ok.jpg"]
-    for ruta in logo_paths:
-        if os.path.exists(ruta):
-            st.image(ruta, width=160)
-            break
-
     st.title("🩻 TriajeX — Radiografías de Columna")
 
     with st.sidebar:
