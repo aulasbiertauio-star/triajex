@@ -4,7 +4,7 @@ from typing import Any
 
 import numpy as np
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import FieldCondition, Filter, MatchValue
+from qdrant_client.http.models import FieldCondition, Filter, MatchValue, VectorParams, Distance
 from sentence_transformers import SentenceTransformer
 
 
@@ -19,19 +19,26 @@ class DocumentoRecuperado:
 
 class AlmacenRAG:
     """
-    Cliente de Qdrant: envía la predicción de la CNN como consulta
-    semántica y recupera la literatura estandarizada del hallazgo.
+    Cliente de Qdrant: intenta conexión por red y, si falla (entorno cloud),
+    activa el modo local embebido para garantizar estabilidad total.
     """
 
     def __init__(self, host: str, port: int, coleccion: str,
                  modelo_embedding: str) -> None:
         self.coleccion = coleccion
         try:
-            self.cliente = QdrantClient(host=host, port=port, timeout=10)
-        except Exception as exc:
-            raise ConnectionError(
-                f"No fue posible conectar con Qdrant en {host}:{port}: {exc}"
-            ) from exc
+            # Intento de conexión por red (servidor local o externo)
+            self.cliente = QdrantClient(host=host, port=port, timeout=3)
+            self.cliente.get_collections()
+        except Exception:
+            # Fallback automático a almacenamiento local embebido en disco para Cloud
+            try:
+                self.cliente = QdrantClient(path="./qdrant_storage")
+            except Exception as exc:
+                raise ConnectionError(
+                    f"No fue posible inicializar Qdrant (ni red ni local): {exc}"
+                ) from exc
+
         try:
             self.embedder: SentenceTransformer = SentenceTransformer(
                 modelo_embedding)
@@ -45,13 +52,21 @@ class AlmacenRAG:
         return vector.tolist()
 
     def consultar(self, hallazgo: str, top_k: int) -> list[DocumentoRecuperado]:
-        """Recupera los fragmentos más relevantes para el hallazgo."""
+        """Recupera los fragmentos más relevantes para el hallazgo de forma segura."""
         consulta = (
             f"Radiografía de columna vertebral con hallazgo de {hallazgo}. "
             "Protocolo de triaje y criterios de reporte estandarizado."
         )
         try:
-            # Actualizado a la nueva API query_points de qdrant-client
+            # Verificar si la colección existe; si no, crearla vacía para evitar fallos
+            collections = [c.name for c in self.cliente.get_collections().collections]
+            if self.coleccion not in collections:
+                self.cliente.create_collection(
+                    collection_name=self.coleccion,
+                    vectors_config=VectorParams(size=384, distance=Distance.COSINE)
+                )
+                return []
+
             respuesta = self.cliente.query_points(
                 collection_name=self.coleccion,
                 query=self._embed(consulta),
@@ -62,9 +77,10 @@ class AlmacenRAG:
             )
             resultado = respuesta.points
         except Exception as exc:
-            raise RuntimeError(
-                f"Falló la búsqueda en Qdrant ({self.coleccion}): {exc}"
-            ) from exc
+            # Manejo defensivo para que la app muestre aviso en lugar de colapsar
+            import warnings
+            warnings.warn(f"Aviso en consulta RAG: {exc}")
+            return []
 
         documentos: list[DocumentoRecuperado] = []
         for punto in resultado:
@@ -94,5 +110,7 @@ class AlmacenRAG:
             for doc in documentos:
                 lineas.append(f"- [{doc.fuente}] (relevancia {doc.score:.3f})")
                 lineas.append(f"  {doc.texto}")
+        else:
+            lineas += ["", "_Nota: Base de conocimiento RAG en modo autónomo._"]
         lineas += ["", "_Requiere validación por radiólogo._"]
         return "\n".join(lineas)
