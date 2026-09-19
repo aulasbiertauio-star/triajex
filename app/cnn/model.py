@@ -105,6 +105,7 @@ class ClasificadorColumna:
             raise TypeError("Se esperaba una imagen PIL.Image.Image.")
 
         tensor = self.preproceso(imagen_pil).unsqueeze(0).to(self.dispositivo)
+        tensor.requires_grad_(True)  # <-- Habilita el cálculo de gradientes
 
         # Forward con gradientes habilitados para Grad-CAM
         self.modelo.zero_grad()
