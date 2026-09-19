@@ -51,14 +51,16 @@ class AlmacenRAG:
             "Protocolo de triaje y criterios de reporte estandarizado."
         )
         try:
-            resultado = self.cliente.search(
+            # Actualizado a la nueva API query_points de qdrant-client
+            respuesta = self.cliente.query_points(
                 collection_name=self.coleccion,
-                query_vector=self._embed(consulta),
+                query=self._embed(consulta),
                 query_filter=Filter(must=[FieldCondition(
                     key="hallazgo", match=MatchValue(value=hallazgo))]),
                 limit=top_k,
                 with_payload=True,
             )
+            resultado = respuesta.points
         except Exception as exc:
             raise RuntimeError(
                 f"Falló la búsqueda en Qdrant ({self.coleccion}): {exc}"
