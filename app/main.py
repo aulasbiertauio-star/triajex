@@ -67,11 +67,24 @@ def main() -> None:
                          f"({prediccion.confianza:.2%})")
             st.bar_chart(prediccion.top_k)
             st.divider()
+            
             if rag is not None:
                 with st.spinner("Consultando literatura médica (RAG)…"):
                     docs = rag.consultar(prediccion.etiqueta,
                                          get_settings().top_k_rag)
                 st.markdown(rag.generar_pre_reporte(prediccion, docs))
+                
+                # --- NUEVO: Disclaimer de transparencia técnica ---
+                precision = get_settings().model_accuracy
+                st.info(
+                    f"ℹ️ **Transparencia MLOps - Limitación de Muestra:**\n\n"
+                    f"F1-Macro validado en desarrollo: **{precision}**. "
+                    f"Debido a la limitación actual del dataset (70 imágenes), el modelo "
+                    f"fue calibrado con un umbral de alta sensibilidad (Recall 95.8%) para "
+                    f"minimizar falsos negativos. No alcanza aún el criterio de 0.89 exigido para autonomía. "
+                    f"Herramienta estrictamente de apoyo al triaje; **requiere validación por médico radiólogo**."
+                )
+                # --------------------------------------------------
             else:
                 st.info("RAG no configurado; solo hallazgo de la CNN.")
         except (TypeError, RuntimeError, ConnectionError) as exc:
