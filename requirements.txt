@@ -1,9 +1,11 @@
-streamlit
-torch
-torchvision
-opencv-python
-qdrant-client
-sentence-transformers
-pydantic-settings
-Pillow
-numpy
+# Sin torch ni sentence-transformers: la inferencia va por onnxruntime.
+# Antes, torch + torchvision + sentence-transformers consumían ~800 MB de RAM
+# y varios minutos de arranque en frío, muy cerca del límite del plan gratuito
+# de Streamlit Community Cloud. Ahora la app arranca en segundos.
+streamlit>=1.36,<2.0
+onnxruntime>=1.17,<2.0
+numpy>=1.24,<3.0
+Pillow>=10.0
+opencv-python-headless>=4.8      # headless: la versión normal pide libGL y falla en Cloud
+qdrant-client>=1.9,<2.0
+scikit-learn>=1.3,<2.0

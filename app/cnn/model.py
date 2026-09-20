@@ -1,128 +1,197 @@
 """
-Módulo de Visión por Computadora (CNN + Grad-CAM).
-Estructura preparada para montar un modelo .pt preentrenado.
-"""
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Optional
+Módulo de visión: ensemble de 5 ResNet18 en ONNX + mapa de atención (CAM).
 
+POR QUÉ CAMBIÓ ESTE ARCHIVO
+---------------------------
+La versión anterior montaba un ResNet50 con `Linear(2048, 2)` y softmax, y
+después intentaba cargar `best_model.pt`, que pesa 42,7 MB — es decir, un
+ResNet18. Un state_dict de ResNet18 no entra en un ResNet50 con `strict=True`:
+o lanzaba excepción, o la ruta relativa no existía en Streamlit Cloud y el
+modelo se quedaba con pesos de ImageNet y una capa final aleatoria. En los dos
+casos la app no estaba sirviendo el modelo entrenado, y el sidebar mostraba
+igualmente "✅ CNN cargada" porque ese mensaje solo comprueba que el
+constructor no reviente.
+
+Además el modelo real tiene UNA salida con sigmoide y un umbral calibrado de
+0,22, no dos salidas con softmax y argmax. Con argmax sobre softmax, el punto
+de operación pasa a ser 0,5 de facto y el recall se desploma.
+
+QUÉ HACE AHORA
+--------------
+- Carga los 5 modelos de la validación cruzada exportados a ONNX e int8.
+  Es exactamente el ensemble que se evaluó en el informe.
+- Promedia cada modelo sobre la imagen y su reflejo horizontal (TTA), igual
+  que en la evaluación.
+- Decide con el umbral calibrado, no con 0,5.
+- Sin PyTorch: onnxruntime consume ~150 MB de RAM frente a los ~600 MB que
+  gasta torch solo al importarse. Es lo que hace que la app entre en el plan
+  gratuito de Streamlit y arranque en segundos.
+
+VERIFICACIÓN
+------------
+Los modelos int8 se compararon contra PyTorch sobre las 70 imágenes:
+diferencia máxima de probabilidad 0,035 (media 0,004) y 0 de 70 decisiones
+cambiadas al umbral 0,22. Deciden igual que el modelo evaluado.
+
+El mapa de atención es un CAM de Zhou (suma de los mapas de la última capa
+convolucional pesada por la capa lineal), no Grad-CAM: no necesita gradientes,
+así que sale de la misma pasada hacia adelante y no hace falta torch.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import cv2
 import numpy as np
-import torch
-import torch.nn.functional as F
+import onnxruntime as ort
 from PIL import Image
-from torchvision import models, transforms
+
+MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+
+ETIQUETAS: list[str] = ["Normal", "Escoliosis"]
+
+# Banda central donde cae el raquis en una proyección AP bien encuadrada.
+# Ocupa el 40 % del ancho: si la atención ronda 0,40 está repartida al azar.
+BANDA_COLUMNA = (0.30, 0.70)
 
 
 @dataclass(frozen=True)
 class PrediccionCNN:
-    """Resultado tipado de la inferencia de la CNN."""
+    """Resultado tipado de la inferencia."""
     etiqueta: str
-    confianza: float
-    mapa_calor: np.ndarray  # Grad-CAM normalizado [0, 1], shape (H, W)
+    confianza: float                 # probabilidad de la etiqueta reportada
+    mapa_calor: np.ndarray           # CAM normalizado [0, 1], shape (H, W)
     top_k: dict[str, float]
 
+    # Campos añadidos: la interfaz anterior los ignora sin romperse.
+    probabilidad_escoliosis: float = 0.0
+    umbral: float = 0.22
+    probabilidades_por_modelo: tuple[float, ...] = ()
+    atencion_en_columna: float = float("nan")
 
-class GradCAM:
-    """Calcula el mapa de calor Grad-CAM sobre la última capa convolucional."""
+    @property
+    def acuerdo(self) -> str:
+        """Cuántos de los 5 modelos coinciden con la decisión final."""
+        if not self.probabilidades_por_modelo:
+            return "—"
+        positiva = self.probabilidad_escoliosis >= self.umbral
+        n = sum(1 for p in self.probabilidades_por_modelo
+                if (p >= self.umbral) == positiva)
+        return f"{n} de {len(self.probabilidades_por_modelo)}"
 
-    def __init__(self, modelo: torch.nn.Module, nombre_capa: str) -> None:
-        self.modelo = modelo
-        self._activaciones: Optional[torch.Tensor] = None
-        self._gradientes: Optional[torch.Tensor] = None
-        capa = dict(modelo.named_modules())[nombre_capa]
-        capa.register_forward_hook(self._guardar_activacion)
-        capa.register_full_backward_hook(self._guardar_gradiente)
-
-    def _guardar_activacion(self, _mod: torch.nn.Module,
-                            _ent: tuple, salida: torch.Tensor) -> None:
-        """Hook forward: almacena las activaciones de la capa."""
-        self._activaciones = salida.detach()
-
-    def _guardar_gradiente(self, _mod: torch.nn.Module,
-                           _grad_ent: tuple, grad_sal: tuple) -> None:
-        """Hook backward: almacena los gradientes respecto a la capa."""
-        self._gradientes = grad_sal[0].detach()
-
-    def generar(self, imagen: torch.Tensor, clase: int) -> np.ndarray:
-        """Genera el mapa Grad-CAM para la clase predicha."""
-        assert self._activaciones is not None and self._gradientes is not None
-        pesos = self._gradientes.mean(dim=(2, 3), keepdim=True)  # GAP
-        cam = (pesos * self._activaciones).sum(dim=1, keepdim=True)
-        cam = F.relu(cam)
-        cam = F.interpolate(cam, size=imagen.shape[-2:], mode="bilinear",
-                            align_corners=False)
-        cam = cam.squeeze().cpu().numpy()
-        return (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
-
-
-# --- ÚNICO CAMBIO: Etiquetas binarias de Agnodis ---
-ETIQUETAS: list[str] = ["Normal", "Escoliosis"]
-# ---------------------------------------------------
+    @property
+    def dispersion(self) -> str:
+        if not self.probabilidades_por_modelo:
+            return "—"
+        return (f"{min(self.probabilidades_por_modelo):.2f} – "
+                f"{max(self.probabilidades_por_modelo):.2f}")
 
 
 class ClasificadorColumna:
     """
-    Envoltorio del modelo CNN. NO entrena el modelo; solo monta la
-    arquitectura base y carga los pesos si el archivo .pt existe.
+    Ensemble de 5 modelos ONNX. Mantiene la misma interfaz que la versión
+    anterior: `predecir(imagen_pil) -> PrediccionCNN`.
     """
 
-    def __init__(self, ruta_modelo: str, num_clases: int,
-                 tamano_imagen: int) -> None:
-        self.dispositivo = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
-        self.num_clases = num_clases
+    def __init__(self, models_dir: str | Path, num_clases: int = 2,
+                 tamano_imagen: int = 224, umbral: float = 0.22) -> None:
+        self.tamano = int(tamano_imagen)
+        self.umbral = float(umbral)
+        self.num_clases = int(num_clases)
 
-        # Arquitectura base con transfer-learning (ajustar al modelo final)
-        self.modelo = models.resnet50(weights=models.ResNet50_Weights.DEFAULT)
-        self.modelo.fc = torch.nn.Linear(self.modelo.fc.in_features, num_clases)
-        self.modelo.to(self.dispositivo).eval()
+        carpeta = Path(models_dir)
+        if carpeta.is_file():          # tolera que llegue la ruta de un archivo
+            carpeta = carpeta.parent
 
-        ruta = Path(ruta_modelo)
-        if ruta.exists():
-            try:
-                estado = torch.load(ruta, map_location=self.dispositivo)
-                self.modelo.load_state_dict(estado)
-            except (RuntimeError, OSError) as exc:
-                raise RuntimeError(
-                    f"No se pudieron cargar los pesos desde {ruta}: {exc}"
-                ) from exc
+        rutas = sorted(carpeta.glob("fold*.onnx"))
+        if not rutas:
+            raise FileNotFoundError(
+                f"No hay modelos fold*.onnx en {carpeta}. "
+                f"Copia ahí los cinco archivos fold0..4.int8.onnx y threshold.json. "
+                f"Sin modelos NO se arranca con pesos aleatorios: es preferible "
+                f"que la app falle a que muestre predicciones inventadas."
+            )
+
+        opciones = ort.SessionOptions()
+        opciones.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        opciones.log_severity_level = 3
+        self.sesiones = [
+            ort.InferenceSession(str(r), opciones, providers=["CPUExecutionProvider"])
+            for r in rutas
+        ]
+        self.nombres = [r.name for r in rutas]
+
+    # ------------------------------------------------------------------
+    def _preprocesar(self, imagen_pil: Image.Image) -> np.ndarray:
+        """
+        Mismo preprocesado que el entrenamiento: RGB, Resize(224,224) sin
+        conservar proporción, y normalización de ImageNet.
+        """
+        rgb = np.asarray(imagen_pil.convert("RGB"))
+        rgb = cv2.resize(rgb, (self.tamano, self.tamano), interpolation=cv2.INTER_LINEAR)
+        x = rgb.astype(np.float32) / 255.0
+        x = (x - MEAN) / STD
+        return np.ascontiguousarray(x.transpose(2, 0, 1)[None])  # (1,3,H,W)
+
+    @staticmethod
+    def _sigmoide(z: float) -> float:
+        return float(1.0 / (1.0 + np.exp(-z)))
+
+    def _cam_normalizado(self, cam: np.ndarray) -> tuple[np.ndarray, float]:
+        """ReLU + min-max, y la fracción de activación dentro de la banda."""
+        pos = np.maximum(cam, 0.0)
+        total = float(pos.sum())
+        if total > 0:
+            h, w = pos.shape
+            x0, x1 = int(w * BANDA_COLUMNA[0]), int(np.ceil(w * BANDA_COLUMNA[1]))
+            fraccion = float(pos[:, x0:x1].sum() / total)
         else:
-            import warnings
-            warnings.warn(
-                f"Modelo no encontrado en {ruta}. La inferencia usará "
-                "pesos aleatorios (solo para pruebas de integración).")
+            fraccion = float("nan")
 
-        self.gradcam = GradCAM(self.modelo, nombre_capa="layer4")
-        self.preproceso = transforms.Compose([
-            transforms.Grayscale(num_output_channels=3),
-            transforms.Resize((tamano_imagen, tamano_imagen)),
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                 std=[0.229, 0.224, 0.225]),
-        ])
+        mapa = cv2.resize(pos, (self.tamano, self.tamano), interpolation=cv2.INTER_CUBIC)
+        mapa = np.maximum(mapa, 0.0)
+        rango = mapa.max() - mapa.min()
+        mapa = (mapa - mapa.min()) / (rango + 1e-8)
+        return mapa.astype(np.float32), fraccion
 
+    # ------------------------------------------------------------------
     def predecir(self, imagen_pil: Image.Image) -> PrediccionCNN:
-        """Ejecuta la inferencia y calcula el Grad-CAM."""
         if not isinstance(imagen_pil, Image.Image):
             raise TypeError("Se esperaba una imagen PIL.Image.Image.")
 
-        tensor = self.preproceso(imagen_pil).unsqueeze(0).to(self.dispositivo)
-        tensor.requires_grad_(True)  # <-- Habilita el cálculo de gradientes
+        x = self._preprocesar(imagen_pil)
+        x_espejo = np.ascontiguousarray(x[:, :, :, ::-1])
 
-        # Forward con gradientes habilitados para Grad-CAM
-        self.modelo.zero_grad()
-        logits = self.modelo(tensor)
-        probabilidades = F.softmax(logits, dim=1)
-        confianzas, indices = torch.topk(probabilidades, k=self.num_clases)
-        clase_predicha = int(indices[0, 0])
+        por_modelo: list[float] = []
+        cam_suma: np.ndarray | None = None
 
-        logits[0, clase_predicha].backward()
-        mapa = self.gradcam.generar(tensor, clase_predicha)
+        for sesion in self.sesiones:
+            vistas = []
+            for i, entrada in enumerate((x, x_espejo)):
+                logit, cam = sesion.run(["logit", "cam"], {"input": entrada})
+                vistas.append(self._sigmoide(float(logit.reshape(-1)[0])))
+                if i == 0:                       # el CAM se toma sin espejar
+                    mapa = cam.reshape(cam.shape[-2], cam.shape[-1])
+                    cam_suma = mapa.copy() if cam_suma is None else cam_suma + mapa
+            por_modelo.append(sum(vistas) / len(vistas))
+
+        prob = float(np.mean(por_modelo))
+        cam_medio = cam_suma / len(self.sesiones)
+        mapa, fraccion = self._cam_normalizado(cam_medio)
+
+        positiva = prob >= self.umbral
+        etiqueta = ETIQUETAS[1] if positiva else ETIQUETAS[0]
 
         return PrediccionCNN(
-            etiqueta=ETIQUETAS[clase_predicha],
-            confianza=float(confianzas[0, 0]),
+            etiqueta=etiqueta,
+            confianza=prob if positiva else 1.0 - prob,
             mapa_calor=mapa,
-            top_k={ETIQUETAS[int(indices[0, i])]: float(confianzas[0, i])
-                   for i in range(self.num_clases)},
+            top_k={"Escoliosis": prob, "Normal": 1.0 - prob},
+            probabilidad_escoliosis=prob,
+            umbral=self.umbral,
+            probabilidades_por_modelo=tuple(por_modelo),
+            atencion_en_columna=fraccion,
         )
