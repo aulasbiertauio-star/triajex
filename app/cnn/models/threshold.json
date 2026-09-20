@@ -1,0 +1,8 @@
+{
+  "threshold": 0.22,
+  "criterio": "NINGÚN umbral alcanza recall >= 0.90; se usó el de mejor F1-macro",
+  "min_recall": 0.9,
+  "calibrado_sobre": "predicciones fuera de muestra (59 imágenes de desarrollo)",
+  "auc_oof": 0.819047619047619,
+  "f1_macro_oof": 0.8055139346718609
+}
